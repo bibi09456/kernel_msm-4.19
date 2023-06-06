@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2012-2021, The Linux Foundation. All rights reserved. */
-/* Copyright (C) 2019 XiaoMi, Inc. */
 
 #include <linux/module.h>
 #include <linux/interrupt.h>
@@ -9,49 +8,26 @@
 #include <linux/gpio.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
-#ifdef CONFIG_BACKLIGHT_CLASS_DEVICE
+#ifndef CONFIG_BACKLIGHT_QCOM_SPMI_WLED
+#include <linux/leds.h>
+#else
 #include <linux/backlight.h>
 #endif
-#include <linux/leds.h>
 #include <linux/pwm.h>
 #include <linux/err.h>
 #include <linux/string.h>
-#include <linux/display_state.h>
-#if IS_ENABLED(CONFIG_MACH_XIAOMI_MSM8937)
-#include <xiaomi-msm8937/mach.h>
-#endif
-#if IS_ENABLED(CONFIG_MACH_XIAOMI_SDM439)
-#include <xiaomi-sdm439/mach.h>
-#include <xiaomi-sdm439/backlight.h>
-#include <xiaomi-sdm439/touchscreen.h>
-#endif
 
 #include "mdss_dsi.h"
 #include "mdss_dba_utils.h"
 #include "mdss_debug.h"
 
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_OLIVE)
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FT8006S_MI439)
-extern void xiaomi_sdm439_ft8006s_lcd_call_tp_reset(int i);
-#endif
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_ITK9881H_MI439)
-extern void xiaomi_sdm439_ilitek_call_resume_work(void);
-#endif
-#endif
-
 #define DT_CMD_HDR 6
 #define DEFAULT_MDP_TRANSFER_TIME 14000
 
 #define VSYNC_DELAY msecs_to_jiffies(17)
-
-static bool display_on = true;
-
-bool is_display_on()
-{
-	return display_on;
-}
-
+#ifndef CONFIG_BACKLIGHT_QCOM_SPMI_WLED
 DEFINE_LED_TRIGGER(bl_led_trigger);
+#endif
 
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 {
@@ -238,14 +214,6 @@ static struct dsi_cmd_desc backlight_cmd = {
 	led_pwm1
 };
 
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_ULYSSE)
-static char xiaomi_ulysse_led_pwm2[3] = {0x51, 0x0 ,0x0};	/* DTYPE_DCS_WRITE1 */
-static struct dsi_cmd_desc xiaomi_ulysse_backlight_cmd2 = {
-	{DTYPE_DCS_LWRITE, 1, 0, 0, 1, sizeof(xiaomi_ulysse_led_pwm2)},
-	xiaomi_ulysse_led_pwm2
-};
-#endif
-
 static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 {
 	struct dcs_cmd_req cmdreq;
@@ -263,18 +231,6 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 
 	memset(&cmdreq, 0, sizeof(cmdreq));
 	cmdreq.cmds = &backlight_cmd;
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_ULYSSE)
-	if (xiaomi_msm8937_mach_get_family() == XIAOMI_MSM8937_MACH_FAMILY_ULYSSE) {
-		if((ctrl->xiaomi_ulysse_ID0_status == 0) && (ctrl->xiaomi_ulysse_ID1_status == 0)) {
-			xiaomi_ulysse_led_pwm2[1] = (unsigned char)((level & 0xf0)>>4);
-			xiaomi_ulysse_led_pwm2[2] = (unsigned char)((level & 0x0f)<<4);
-			cmdreq.cmds = &xiaomi_ulysse_backlight_cmd2;
-			pr_info("%s: led_pwm2[1]=0x%x, led_pwm2[2]=0x%x\n", __func__, xiaomi_ulysse_led_pwm2[1], xiaomi_ulysse_led_pwm2[2]);
-		} else {
-			pr_info("%s: ugglite and ugg use default led_pwm1\n", __func__);
-		}
-	}
-#endif
 	cmdreq.cmds_cnt = 1;
 	cmdreq.flags = CMD_REQ_COMMIT | CMD_CLK_CTRL;
 	cmdreq.rlen = 0;
@@ -301,15 +257,6 @@ static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 			goto disp_en_gpio_err;
 		}
 	}
-
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_ULYSSE)
-	if (xiaomi_msm8937_mach_get_family() == XIAOMI_MSM8937_MACH_FAMILY_ULYSSE) {
-		if (gpio_is_valid(ctrl_pdata->rst_gpio)) {
-			gpio_free(ctrl_pdata->rst_gpio);
-		}
-	}
-#endif
-
 	rc = gpio_request(ctrl_pdata->rst_gpio, "disp_rst_n");
 	if (rc) {
 		pr_err("request reset gpio failed, rc=%d\n",
@@ -325,49 +272,6 @@ static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 			goto avdd_en_gpio_err;
 		}
 	}
-
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_ULYSSE)
-	if (xiaomi_msm8937_mach_get_family() == XIAOMI_MSM8937_MACH_FAMILY_ULYSSE) {
-		if (gpio_is_valid(ctrl_pdata->xiaomi_ulysse_ocp2131_enp_gpio)) {
-			rc = gpio_request(ctrl_pdata->xiaomi_ulysse_ocp2131_enp_gpio,"ocp2131_enp_enable");
-			if (rc) {
-				pr_err("request xiaomi_ulysse_ocp2131_enp_gpio failed, rc=%d\n",
-						rc);
-				goto xiaomi_ulysse_ocp2131_enp_gpio;
-			}
-		}
-
-		if (gpio_is_valid(ctrl_pdata->xiaomi_ulysse_ocp2131_enn_gpio)) {
-			rc = gpio_request(ctrl_pdata->xiaomi_ulysse_ocp2131_enn_gpio,"ocp2131_enn_enable");
-			if (rc) {
-				pr_err("request xiaomi_ulysse_ocp2131_enn_gpio failed, rc=%d\n",
-						rc);
-				goto xiaomi_ulysse_ocp2131_enn_gpio;
-			}
-		}
-
-		if (gpio_is_valid(ctrl_pdata->xiaomi_ulysse_lcmio_en_gpio)) {
-			gpio_free(ctrl_pdata->xiaomi_ulysse_lcmio_en_gpio);
-		}
-
-		if (gpio_is_valid(ctrl_pdata->xiaomi_ulysse_lcmio_en_gpio)) {
-			rc = gpio_request(ctrl_pdata->xiaomi_ulysse_lcmio_en_gpio,"lcmio-en-gpio");
-			if (rc) {
-				pr_err("request xiaomi_ulysse_lcmio_en_gpio failed, rc=%d\n",rc);
-				goto xiaomi_ulysse_lcmio_en_gpio_err;
-			}
-		}
-
-		if(gpio_is_valid(ctrl_pdata->xiaomi_ulysse_lcm_vci_en_gpio)) {
-			rc = gpio_request(ctrl_pdata->xiaomi_ulysse_lcm_vci_en_gpio,"lcm_vci_en_gpio");
-			if (rc) {
-				pr_err("request xiaomi_ulysse_lcm_vci_en_gpio failed, rc=%d\n",rc);
-				goto xiaomi_ulysse_lcm_vci_en_gpio_err;
-			}
-		}
-	}
-#endif
-
 	if (gpio_is_valid(ctrl_pdata->lcd_mode_sel_gpio)) {
 		rc = gpio_request(ctrl_pdata->lcd_mode_sel_gpio, "mode_sel");
 		if (rc) {
@@ -384,20 +288,6 @@ lcd_mode_sel_gpio_err:
 		gpio_free(ctrl_pdata->avdd_en_gpio);
 avdd_en_gpio_err:
 	gpio_free(ctrl_pdata->rst_gpio);
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_ULYSSE)
-xiaomi_ulysse_ocp2131_enp_gpio:
-	if (xiaomi_msm8937_mach_get_family() == XIAOMI_MSM8937_MACH_FAMILY_ULYSSE)
-		gpio_free(ctrl_pdata->xiaomi_ulysse_ocp2131_enp_gpio);
-xiaomi_ulysse_ocp2131_enn_gpio:
-	if (xiaomi_msm8937_mach_get_family() == XIAOMI_MSM8937_MACH_FAMILY_ULYSSE)
-		gpio_free(ctrl_pdata->xiaomi_ulysse_ocp2131_enn_gpio);
-xiaomi_ulysse_lcmio_en_gpio_err:
-	if (xiaomi_msm8937_mach_get_family() == XIAOMI_MSM8937_MACH_FAMILY_ULYSSE)
-		gpio_free(ctrl_pdata->xiaomi_ulysse_lcmio_en_gpio);
-xiaomi_ulysse_lcm_vci_en_gpio_err:
-	if (xiaomi_msm8937_mach_get_family() == XIAOMI_MSM8937_MACH_FAMILY_ULYSSE)
-		gpio_free(ctrl_pdata->xiaomi_ulysse_lcm_vci_en_gpio);
-#endif
 rst_gpio_err:
 	if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
 		gpio_free(ctrl_pdata->disp_en_gpio);
@@ -523,27 +413,6 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			return rc;
 		}
 		if (!pinfo->cont_splash_enabled) {
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_ULYSSE)
-			if (xiaomi_msm8937_mach_get_family() == XIAOMI_MSM8937_MACH_FAMILY_ULYSSE) {
-				if (gpio_is_valid(ctrl_pdata->xiaomi_ulysse_ocp2131_enp_gpio)) {
-					rc = gpio_direction_output(
-						ctrl_pdata->xiaomi_ulysse_ocp2131_enp_gpio, 1);
-					if (rc) {
-						pr_err("%s: unable to set dir for xiaomi_ulysse_ocp2131_enp_gpio\n",__func__);
-						goto exit;
-					}
-				}
-				mdelay(2);
-				if (gpio_is_valid(ctrl_pdata->xiaomi_ulysse_ocp2131_enn_gpio)) {
-					rc = gpio_direction_output(
-						ctrl_pdata->xiaomi_ulysse_ocp2131_enn_gpio, 1);
-					if (rc) {
-						pr_err("%s: unable to set dir for xiaomi_ulysse_ocp2131_enn_gpio\n",__func__);
-						goto exit;
-					}
-				}
-			}
-#endif
 			if (gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
 				rc = gpio_direction_output(
 					ctrl_pdata->disp_en_gpio, 1);
@@ -553,37 +422,6 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 					goto exit;
 				}
 			}
-
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_ULYSSE)
-			if (xiaomi_msm8937_mach_get_family() == XIAOMI_MSM8937_MACH_FAMILY_ULYSSE) {
-				if(gpio_is_valid(ctrl_pdata->xiaomi_ulysse_lcmio_en_gpio)) {
-					pr_info("%s: ysg gpio_out put 1.8v vddio\n", __func__);
-					rc = gpio_direction_output(ctrl_pdata->xiaomi_ulysse_lcmio_en_gpio,1);
-					gpio_set_value(ctrl_pdata->xiaomi_ulysse_lcmio_en_gpio,1);
-					if (rc) {
-						pr_err("%s: unable to set dir for lcmio en gpio\n",
-							__func__);
-						goto exit;
-					}
-				}
-				msleep(2);
-				if(gpio_is_valid(ctrl_pdata->xiaomi_ulysse_lcm_vci_en_gpio)){
-					pr_info("%s: ysg gpio_out put 3.3v vci\n", __func__);
-					gpio_direction_output(ctrl_pdata->xiaomi_ulysse_lcm_vci_en_gpio,1);
-					mdelay(2);
-					gpio_direction_output(ctrl_pdata->xiaomi_ulysse_lcm_vci_en_gpio,0);
-					mdelay(2);
-					gpio_direction_output(ctrl_pdata->xiaomi_ulysse_lcm_vci_en_gpio,1);
-					mdelay(10);
-					if (rc) {
-						pr_err("%s: unable to set dir for lcm-vci-en gpio\n",
-							__func__);
-						goto exit;
-					}
-				}
-				msleep(10);
-			}
-#endif
 
 			if (pdata->panel_info.rst_seq_len) {
 				rc = gpio_direction_output(ctrl_pdata->rst_gpio,
@@ -595,24 +433,6 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 				}
 			}
 
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_OLIVE) && IS_ENABLED(CONFIG_TOUCHSCREEN_FT8006S_MI439)
-			if (xiaomi_sdm439_mach_get_family() == XIAOMI_SDM439_MACH_FAMILY_OLIVE &&
-				xiaomi_sdm439_touchscreen_type == XIAOMI_SDM439_TOUCHSCREEN_FT8006S) {
-				xiaomi_sdm439_ft8006s_lcd_call_tp_reset(0);
-				gpio_set_value((ctrl_pdata->rst_gpio), pdata->panel_info.rst_seq[0]);
-				if (pdata->panel_info.rst_seq[1])
-					usleep_range((pinfo->rst_seq[1] * 1000), (pinfo->rst_seq[1] * 1000) + 10);
-				gpio_set_value((ctrl_pdata->rst_gpio), pdata->panel_info.rst_seq[2]);
-				if (pdata->panel_info.rst_seq[3])
-					usleep_range((pinfo->rst_seq[3] * 1000 - 5000), (pinfo->rst_seq[3] * 1000) + 10 - 5000);
-				xiaomi_sdm439_ft8006s_lcd_call_tp_reset(1);
-				usleep_range(5000, 5010);
-				gpio_set_value((ctrl_pdata->rst_gpio), pdata->panel_info.rst_seq[4]);
-				if (pdata->panel_info.rst_seq[5])
-					usleep_range((pinfo->rst_seq[5] * 1000), (pinfo->rst_seq[5] * 1000) + 10);
-			} else
-#endif
-
 			for (i = 0; i < pdata->panel_info.rst_seq_len; ++i) {
 				gpio_set_value((ctrl_pdata->rst_gpio),
 					pdata->panel_info.rst_seq[i]);
@@ -620,30 +440,6 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 					usleep_range(pinfo->rst_seq[i] * 1000,
 						pinfo->rst_seq[i] * 1000);
 			}
-
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_OLIVE)
-			if (xiaomi_sdm439_mach_get_family() == XIAOMI_SDM439_MACH_FAMILY_OLIVE) {
-				if (!strcmp(pdata->panel_info.panel_name, "nvt36525b hdplus c3i video mode dsi panel")) {
-					pr_info("%s: This is novatek LCM!!!\n", __func__);
-					msleep(10);
-					for (i = 0; i < pdata->panel_info.rst_seq_len; ++i) {
-						gpio_set_value((ctrl_pdata->rst_gpio),
-							pdata->panel_info.rst_seq[i]);
-						if (pdata->panel_info.rst_seq[++i])
-							usleep_range((pinfo->rst_seq[i] * 1000),
-							(pinfo->rst_seq[i] * 1000) + 10);
-					}
-				}
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_ITK9881H_MI439)
-				if (xiaomi_sdm439_touchscreen_type == XIAOMI_SDM439_TOUCHSCREEN_ITK9881H) {
-					pr_info("%s: ILITEK LCD Call TP Reset start! \n", __func__);
-					xiaomi_sdm439_ilitek_call_resume_work();
-					pr_info("%s: ILITEK LCD Call TP Reset end! \n", __func__);
-					mdelay(35);
-				}
-#endif
-			}
-#endif
 
 			if (gpio_is_valid(ctrl_pdata->avdd_en_gpio)) {
 				if (ctrl_pdata->avdd_en_gpio_invert) {
@@ -695,49 +491,12 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 
 			gpio_free(ctrl_pdata->avdd_en_gpio);
 		}
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_ULYSSE)
-		if (xiaomi_msm8937_mach_get_family() == XIAOMI_MSM8937_MACH_FAMILY_ULYSSE) {
-			if (gpio_is_valid(ctrl_pdata->rst_gpio)) {
-				gpio_set_value((ctrl_pdata->rst_gpio), 0);
-				gpio_free(ctrl_pdata->rst_gpio);
-				mdelay(15);
-			}
-			if (gpio_is_valid(ctrl_pdata->xiaomi_ulysse_ocp2131_enn_gpio)) {
-				gpio_set_value((ctrl_pdata->xiaomi_ulysse_ocp2131_enn_gpio), 0);
-				gpio_free(ctrl_pdata->xiaomi_ulysse_ocp2131_enn_gpio);
-			}
-			mdelay(2);
-			if (gpio_is_valid(ctrl_pdata->xiaomi_ulysse_ocp2131_enp_gpio)) {
-				gpio_set_value((ctrl_pdata->xiaomi_ulysse_ocp2131_enp_gpio), 0);
-				gpio_free(ctrl_pdata->xiaomi_ulysse_ocp2131_enp_gpio);
-			}
-		}
-#endif
 		if (gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
 			gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
 			gpio_free(ctrl_pdata->disp_en_gpio);
 		}
-		if (gpio_is_valid(ctrl_pdata->rst_gpio)) {
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_OLIVE)
-			if (xiaomi_sdm439_mach_get_family() == XIAOMI_SDM439_MACH_FAMILY_OLIVE)
-				gpio_set_value((ctrl_pdata->rst_gpio), 1);
-			else
-#endif
-			gpio_set_value((ctrl_pdata->rst_gpio), 0);
-			gpio_free(ctrl_pdata->rst_gpio);
-		}
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_ULYSSE)
-		if (xiaomi_msm8937_mach_get_family() == XIAOMI_MSM8937_MACH_FAMILY_ULYSSE) {
-			if (gpio_is_valid(ctrl_pdata->xiaomi_ulysse_lcm_vci_en_gpio)) {
-				gpio_set_value((ctrl_pdata->xiaomi_ulysse_lcm_vci_en_gpio),0);
-				gpio_free(ctrl_pdata->xiaomi_ulysse_lcm_vci_en_gpio);
-			}
-			if (gpio_is_valid(ctrl_pdata->xiaomi_ulysse_lcmio_en_gpio),0) {
-				gpio_set_value((ctrl_pdata->xiaomi_ulysse_lcmio_en_gpio),0);
-				gpio_free(ctrl_pdata->xiaomi_ulysse_lcmio_en_gpio);
-			}
-		}
-#endif
+		gpio_set_value((ctrl_pdata->rst_gpio), 0);
+		gpio_free(ctrl_pdata->rst_gpio);
 		if (gpio_is_valid(ctrl_pdata->lcd_mode_sel_gpio)) {
 			gpio_set_value(ctrl_pdata->lcd_mode_sel_gpio, 0);
 			gpio_free(ctrl_pdata->lcd_mode_sel_gpio);
@@ -1086,13 +845,6 @@ static void mdss_dsi_panel_switch_mode(struct mdss_panel_data *pdata,
 		mdss_dsi_panel_dsc_pps_send(ctrl_pdata, &pdata->panel_info);
 }
 
-#if IS_ENABLED(CONFIG_MFD_TI_LMU_MI439)
-extern int xiaomi_sdm439_lm3697_set_brightness(int brightness);
-#endif
-#if IS_ENABLED(CONFIG_BACKLIGHT_KTD3136_MI439)
-extern int xiaomi_sdm439_ktd3137_brightness_set(int brightness);
-#endif
-
 static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 							u32 bl_level)
 {
@@ -1106,15 +858,6 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
-
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_WINGTECH)
-	if (xiaomi_msm8937_mach_get_family() == XIAOMI_MSM8937_MACH_FAMILY_WINGTECH) {
-		if (!ctrl_pdata->wingtech_is_Lcm_Present) {
-			pr_err("%s: ctrl_pdata->wingtech_is_Lcm_Present is false, Abort\n", __func__);
-			return;
-		}
-	}
-#endif
 
 	/*
 	 * Some backlight controllers specify a minimum duty cycle
@@ -1135,12 +878,11 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 
 	switch (ctrl_pdata->bklt_ctrl) {
 	case BL_WLED:
-#ifdef CONFIG_BACKLIGHT_CLASS_DEVICE
-		if (ctrl_pdata->raw_bd)
-			backlight_device_set_brightness(ctrl_pdata->raw_bd, bl_level);
-		else
-#endif
+#ifndef CONFIG_BACKLIGHT_QCOM_SPMI_WLED
 		led_trigger_event(bl_led_trigger, bl_level);
+#else
+		backlight_device_set_brightness(ctrl_pdata->raw_bd, bl_level);
+#endif
 		break;
 	case BL_PWM:
 		mdss_dsi_panel_bklt_pwm(ctrl_pdata, bl_level);
@@ -1169,16 +911,6 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 				mdss_dsi_panel_bklt_dcs(sctrl, bl_level);
 		}
 		break;
-#if IS_ENABLED(CONFIG_MFD_TI_LMU_MI439)
-	case BL_LM3697_MI439:
-		xiaomi_sdm439_lm3697_set_brightness(bl_level);
-		break;
-#endif
-#if IS_ENABLED(CONFIG_BACKLIGHT_KTD3136_MI439)
-	case BL_KTD3136_MI439:
-		xiaomi_sdm439_ktd3137_brightness_set(bl_level);
-		break;
-#endif
 	default:
 		pr_err("%s: Unknown bl_ctrl configuration\n",
 			__func__);
@@ -1197,8 +929,6 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
-
-	display_on = true;
 
 	pinfo = &pdata->panel_info;
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
@@ -1285,8 +1015,6 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
-
-	display_on = false;
 
 	pinfo = &pdata->panel_info;
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
@@ -2073,7 +1801,6 @@ static bool mdss_dsi_cmp_panel_reg_v2(struct mdss_dsi_ctrl_pdata *ctrl)
 	int i, j = 0;
 	int len = 0, *lenp;
 	int group = 0;
-	struct mdss_panel_info *pinfo = &(ctrl->panel_data.panel_info);
 
 	lenp = ctrl->status_valid_params ?: ctrl->status_cmds_rlen;
 
@@ -2082,23 +1809,6 @@ static bool mdss_dsi_cmp_panel_reg_v2(struct mdss_dsi_ctrl_pdata *ctrl)
 
 	for (j = 0; j < ctrl->groups; ++j) {
 		for (i = 0; i < len; ++i) {
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_ULYSSE)
-			if (xiaomi_msm8937_mach_get_family() == XIAOMI_MSM8937_MACH_FAMILY_ULYSSE) {
-				if (ctrl->return_buf[0] !=
-					ctrl->status_value[group + 0]){
-					printk("return_buf[i]=%d\n",ctrl->return_buf[i]);
-					break;
-				}
-				/*to check the panel register */
-				if(!strcmp(pinfo->panel_name, "tm otm1901a 720p video mode dsi panel")) {
-					if (ctrl->return_buf[1] !=
-						ctrl->status_value[group + 1]) {
-						printk("hml read 0x1d = 0x%x\n",ctrl->return_buf[1]);
-					}
-				}
-				continue;
-			}
-#endif
 			pr_debug("[%i] return:0x%x status:0x%x\n",
 				i, ctrl->return_buf[i],
 				(unsigned int)ctrl->status_value[group + i]);
@@ -2321,13 +2031,6 @@ static void mdss_dsi_parse_esd_params(struct device_node *np,
 
 	pinfo->esd_check_enabled = of_property_read_bool(np,
 		"qcom,esd-check-enabled");
-
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_WINGTECH)
-	if (xiaomi_msm8937_mach_get_family() == XIAOMI_MSM8937_MACH_FAMILY_WINGTECH) {
-		if ((!pinfo->esd_check_enabled) || (!ctrl->wingtech_is_Lcm_Present))
-			return;
-	}
-#endif
 
 	if (!pinfo->esd_check_enabled)
 		return;
@@ -2681,7 +2384,7 @@ dynamic_bitclk:
 	pinfo->dynamic_bitclk = true;
 }
 
-#ifdef CONFIG_BACKLIGHT_CLASS_DEVICE
+#ifdef CONFIG_BACKLIGHT_QCOM_SPMI_WLED
 static int dsi_panel_wled_register(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
 	int rc = 0;
@@ -2708,19 +2411,16 @@ int mdss_panel_parse_bl_settings(struct device_node *np,
 	data = of_get_property(np, "qcom,mdss-dsi-bl-pmic-control-type", NULL);
 	if (data) {
 		if (!strcmp(data, "bl_ctrl_wled")) {
-#ifdef CONFIG_BACKLIGHT_CLASS_DEVICE
+#ifndef CONFIG_BACKLIGHT_QCOM_SPMI_WLED
+			led_trigger_register_simple("bkl-trigger",
+				&bl_led_trigger);
+#else
 			rc = dsi_panel_wled_register(ctrl_pdata);
-			if (!rc) {
-				pr_debug("%s: SUCCESS-> WLED TRIGGER register (Backlight class)\n",
-					__func__);
-			} else
+			if (rc)
+				return rc;
 #endif
-			{
-				led_trigger_register_simple("bkl-trigger",
-					&bl_led_trigger);
-				pr_debug("%s: SUCCESS-> WLED TRIGGER register (LED class)\n",
-					__func__);
-			}
+			pr_debug("%s: SUCCESS-> WLED TRIGGER register\n",
+				__func__);
 			ctrl_pdata->bklt_ctrl = BL_WLED;
 		} else if (!strcmp(data, "bl_ctrl_pwm")) {
 			ctrl_pdata->bklt_ctrl = BL_PWM;
@@ -2769,23 +2469,6 @@ int mdss_panel_parse_bl_settings(struct device_node *np,
 
 			pr_debug("%s: Configured DCS_CMD bklt ctrl\n",
 								__func__);
-#if IS_ENABLED(CONFIG_MACH_XIAOMI_SDM439)
-		} else if (xiaomi_sdm439_mach_get() && !strcmp(data, "bl_mount")){
-			switch (xiaomi_sdm439_backlight_ic_type_get()) {
-#if IS_ENABLED(CONFIG_BACKLIGHT_KTD3136_MI439)
-				case XIAOMI_SDM439_BACKLIGHT_IC_KTD3136:
-					ctrl_pdata->bklt_ctrl = BL_KTD3136_MI439;
-					break;
-#endif // CONFIG_BACKLIGHT_KTD3136_MI439
-#if IS_ENABLED(CONFIG_MFD_TI_LMU_MI439)
-				case XIAOMI_SDM439_BACKLIGHT_IC_LM3697:
-					ctrl_pdata->bklt_ctrl = BL_LM3697_MI439;
-					break;
-#endif // CONFIG_MFD_TI_LMU_MI439
-				default:
-					break;
-			}
-#endif // CONFIG_MACH_XIAOMI_SDM439
 		}
 	}
 	return 0;
@@ -2836,12 +2519,13 @@ int mdss_dsi_panel_timing_switch(struct mdss_dsi_ctrl_pdata *ctrl,
 	return 0;
 }
 
+#ifndef CONFIG_BACKLIGHT_QCOM_SPMI_WLED
 void mdss_dsi_unregister_bl_settings(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
 	if (ctrl_pdata->bklt_ctrl == BL_WLED)
 		led_trigger_unregister_simple(bl_led_trigger);
 }
-
+#endif
 static int mdss_dsi_panel_timing_from_dt(struct device_node *np,
 		struct dsi_panel_timing *pt,
 		struct mdss_panel_data *panel_data)
@@ -2973,42 +2657,13 @@ static int  mdss_dsi_panel_config_res_properties(struct device_node *np,
 		struct mdss_panel_data *panel_data,
 		bool default_timing)
 {
-	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_ULYSSE)
-	int xiaomi_ulysse_board_id0 = 0;
-	int xiaomi_ulysse_board_id1 = 0;
-#endif
 	int rc = 0;
 
-	ctrl_pdata = container_of(panel_data, struct mdss_dsi_ctrl_pdata,
-							panel_data);
-
 	mdss_dsi_parse_roi_alignment(np, pt);
-
-#if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_ULYSSE)
-	if(xiaomi_msm8937_mach_get_family() == XIAOMI_MSM8937_MACH_FAMILY_ULYSSE) {
-		if (gpio_is_valid(ctrl_pdata->xiaomi_ulysse_board_id0_gpio) && gpio_is_valid(ctrl_pdata->xiaomi_ulysse_board_id1_gpio)) {
-			xiaomi_ulysse_board_id0 = gpio_get_value(ctrl_pdata->xiaomi_ulysse_board_id0_gpio);
-			xiaomi_ulysse_board_id1 = gpio_get_value(ctrl_pdata->xiaomi_ulysse_board_id1_gpio);
-			pr_info("%s: xiaomi_ulysse_board_id0=%d, xiaomi_ulysse_board_id1=%d\n", __func__, xiaomi_ulysse_board_id0, xiaomi_ulysse_board_id1);
-			if (!strcmp(panel_data->panel_info.panel_name, "hx otm1901a 720p video mode dsi panel")) {
-				if((xiaomi_ulysse_board_id0 == 1 && xiaomi_ulysse_board_id1 == 0) ||
-					(xiaomi_ulysse_board_id0 == 1 && xiaomi_ulysse_board_id1 == 1)) {
-					pr_info("%s: Parse qcom,mdss-dsi-india-on-command\n", __func__);
-					mdss_dsi_parse_dcs_cmds(np, &pt->on_cmds,
-					"qcom,mdss-dsi-india-on-command",
-					"qcom,mdss-dsi-on-command-state");
-					goto parsed_dsi_on_command;
-				}
-			}
-		}
-	}
-#endif
 
 	mdss_dsi_parse_dcs_cmds(np, &pt->on_cmds,
 		"qcom,mdss-dsi-on-command",
 		"qcom,mdss-dsi-on-command-state");
-parsed_dsi_on_command:
 
 	mdss_dsi_parse_dcs_cmds(np, &pt->post_panel_on_cmds,
 		"qcom,mdss-dsi-post-panel-on-command", NULL);
