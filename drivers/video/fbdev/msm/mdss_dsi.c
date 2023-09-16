@@ -4592,7 +4592,7 @@ int dsi_panel_device_register(struct platform_device *ctrl_pdev,
 	clk_rate = pinfo->clk_rate;
 	do_div(clk_rate, 8U);
 	ctrl_pdata->byte_clk_rate = (u32)clk_rate;
-	pr_debug("%s: pclk=%d, bclk=%d\n", __func__,
+	pr_info("%s: pclk=%d, bclk=%d\n", __func__,
 			ctrl_pdata->pclk_rate, ctrl_pdata->byte_clk_rate);
 
 	ctrl_pdata->esc_clk_rate_hz = pinfo->esc_clk_rate_hz;
