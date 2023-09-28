@@ -2292,8 +2292,10 @@ static int clk_change_rate(struct clk_core *core)
 	}
 
 	rc = clk_pm_runtime_get(core);
-	if (rc)
+	if (rc) {
+		pr_err("%s: fuck line %d, rc=%d\n", __func__, __LINE__, rc);
 		return rc;
+	}
 
 	if (core->flags & CLK_SET_RATE_UNGATE) {
 		unsigned long flags;
@@ -2330,6 +2332,7 @@ static int clk_change_rate(struct clk_core *core)
 		rc = core->ops->set_rate(core->hw, core->new_rate,
 						best_parent_rate);
 		if (rc) {
+			pr_err("%s: fuck line %d, rc=%d, name=%s\n", __func__, __LINE__, rc, core->name);
 			trace_clk_set_rate_complete(core, core->new_rate);
 			goto err_set_rate;
 		}
@@ -2366,13 +2369,19 @@ static int clk_change_rate(struct clk_core *core)
 		if (child->new_parent && child->new_parent != core)
 			continue;
 		rc = clk_change_rate(child);
-		if (rc)
+		if (rc) {
+			pr_err("%s: fuck line %d, rc=%d\n", __func__, __LINE__, rc);
 			goto err_set_rate;
+		}
 	}
 
 	/* handle the new child who might not be in core->children yet */
-	if (core->new_child)
+	if (core->new_child) {
 		rc = clk_change_rate(core->new_child);
+		if (rc) {
+			pr_err("%s: fuck line %d, rc=%d\n", __func__, __LINE__, rc);
+		}
+	}
 
 err_set_rate:
 	clk_pm_runtime_put(core);
@@ -2515,7 +2524,7 @@ static int clk_core_set_rate_nolock(struct clk_core *core,
 	/* notify that we are about to change rates */
 	fail_clk = clk_propagate_rate_change(top, PRE_RATE_CHANGE);
 	if (fail_clk) {
-		pr_debug("%s: failed to set %s clock to run at %lu\n", __func__,
+		pr_debug("%s: 1 failed to set %s clock to run at %lu\n", __func__,
 				fail_clk->name, req_rate);
 		clk_propagate_rate_change(top, ABORT_RATE_CHANGE);
 		ret = -EBUSY;
@@ -2527,8 +2536,8 @@ static int clk_core_set_rate_nolock(struct clk_core *core,
 	ret = clk_change_rate(top);
 	set_rate_nesting_count--;
 	if (ret) {
-		pr_err("%s: failed to set %s clock to run at %lu\n", __func__,
-				top->name, req_rate);
+		pr_err("%s: 2 failed to set %s clock to run at %lu, ret=%d\n", __func__,
+				top->name, req_rate, ret);
 		clk_propagate_rate_change(top, ABORT_RATE_CHANGE);
 		clk_vote_safe_vdd();
 		goto post_rate_change_err;

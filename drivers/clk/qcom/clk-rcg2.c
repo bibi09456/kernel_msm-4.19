@@ -1149,10 +1149,15 @@ static int clk_pixel_set_rate(struct clk_hw *hw, unsigned long rate,
 	u32 mask = BIT(rcg->hid_width) - 1;
 	u32 hid_div, cfg;
 	int i, num_parents = clk_hw_get_num_parents(hw);
+	int rc;
+
+	pr_err("%s: Enter %s\n", __func__, rcg->clkr.hw.init->name);
 
 	regmap_read(rcg->clkr.regmap, rcg->cmd_rcgr + CFG_REG, &cfg);
 	cfg &= CFG_SRC_SEL_MASK;
 	cfg >>= CFG_SRC_SEL_SHIFT;
+
+	pr_err("%s: 1\n", __func__, rcg->clkr.hw.init->name);
 
 	for (i = 0; i < num_parents; i++)
 		if (cfg == rcg->parent_map[i].cfg) {
@@ -1160,13 +1165,18 @@ static int clk_pixel_set_rate(struct clk_hw *hw, unsigned long rate,
 			break;
 		}
 
+	pr_err("%s: 2\n", __func__, rcg->clkr.hw.init->name);
+
 	for (; frac->num; frac++) {
+		pr_err("%s: 2.1\n", __func__, rcg->clkr.hw.init->name);
 		request = (rate * frac->den) / frac->num;
 
+		pr_err("%s: 2.2\n", __func__, rcg->clkr.hw.init->name);
 		if ((parent_rate < (request - delta)) ||
 			(parent_rate > (request + delta)))
 			continue;
 
+		pr_err("%s: 2.3\n", __func__, rcg->clkr.hw.init->name);
 		regmap_read(rcg->clkr.regmap, rcg->cmd_rcgr + CFG_REG,
 				&hid_div);
 		f.pre_div = hid_div;
@@ -1175,10 +1185,15 @@ static int clk_pixel_set_rate(struct clk_hw *hw, unsigned long rate,
 		f.m = frac->num;
 		f.n = frac->den;
 
+		pr_err("%s: 2.4\n", __func__, rcg->clkr.hw.init->name);
 		if (clk_rcg2_current_config(rcg, &f))
 			return 0;
-		return clk_rcg2_configure(rcg, &f);
+		pr_err("%s: 2.5\n", __func__, rcg->clkr.hw.init->name);
+		rc = clk_rcg2_configure(rcg, &f);
+		pr_err("%s: clk_rcg2_configure rc=%d\n", rc);
+		return rc;
 	}
+	pr_err("%s: Return -EINVAL\n", __func__);
 	return -EINVAL;
 }
 

@@ -897,6 +897,8 @@ int pll_vco_set_rate_14nm(struct clk_hw *hw, unsigned long rate,
 	struct mdss_pll_resources *slave;
 	struct dsi_pll_db *pdb;
 
+	pr_err("%s: Enter %s\n", __func__, vco->hw.init->name);
+
 	pdb = (struct dsi_pll_db *)pll->priv;
 	if (!pdb) {
 		pr_err("No prov found\n");
@@ -911,7 +913,7 @@ int pll_vco_set_rate_14nm(struct clk_hw *hw, unsigned long rate,
 
 	pll_source_setup(pll);
 
-	pr_debug("%s: ndx=%d base=%pK rate=%lu slave=%pK\n", __func__,
+	pr_info("%s: ndx=%d base=%pK rate=%lu slave=%pK\n", __func__,
 				pll->index, pll->pll_base, rate, pll->slave);
 
 	pll->vco_current_rate = rate;
@@ -937,6 +939,7 @@ int pll_vco_set_rate_14nm(struct clk_hw *hw, unsigned long rate,
 
 	mdss_pll_resource_enable(pll, false);
 
+	pr_err("%s: Exit, rc=%d\n", __func__, rc);
 	return rc;
 }
 
