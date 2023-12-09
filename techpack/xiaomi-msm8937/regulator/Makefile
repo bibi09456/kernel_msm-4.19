@@ -1,1 +1,0 @@
-obj-$(CONFIG_REGULATOR_TPS65132_MI8937) += tps65132-regulator.o

@@ -1,9 +1,0 @@
-/ {
-	android,fstab_suffix = "mi439";
-};
-
-&firmware {
-	android {
-		/delete-node/ fstab;
-	};
-};
