@@ -2308,6 +2308,7 @@ static int mdss_dsi_parse_reset_seq(struct device_node *np,
 
 static bool mdss_dsi_cmp_panel_reg_v2(struct mdss_dsi_ctrl_pdata *ctrl)
 {
+	bool mismatched;
 	int i, j = 0;
 	int len = 0, *lenp;
 	int group = 0;
@@ -2319,6 +2320,7 @@ static bool mdss_dsi_cmp_panel_reg_v2(struct mdss_dsi_ctrl_pdata *ctrl)
 		len += lenp[i];
 
 	for (j = 0; j < ctrl->groups; ++j) {
+		mismatched = false;
 		for (i = 0; i < len; ++i) {
 #if IS_ENABLED(CONFIG_MACH_FAMILY_XIAOMI_ULYSSE)
 			if (xiaomi_msm8937_mach_get_family() == XIAOMI_MSM8937_MACH_FAMILY_ULYSSE) {
@@ -2337,17 +2339,18 @@ static bool mdss_dsi_cmp_panel_reg_v2(struct mdss_dsi_ctrl_pdata *ctrl)
 				continue;
 			}
 #endif
-			pr_debug("[%i] return:0x%x status:0x%x\n",
-				i, ctrl->return_buf[i],
-				(unsigned int)ctrl->status_value[group + i]);
 			MDSS_XLOG(ctrl->ndx, ctrl->return_buf[i],
 					ctrl->status_value[group + i]);
 			if (ctrl->return_buf[i] !=
-				ctrl->status_value[group + i])
-				break;
+				ctrl->status_value[group + i]) {
+				pr_err("%s: [%i][%i] return:0x%x status:0x%x\n",
+					__func__, j, i, ctrl->return_buf[i],
+					(unsigned int)ctrl->status_value[group + i]);
+				mismatched = true;
+			}
 		}
 
-		if (i == len)
+		if (i == len && !mismatched)
 			return true;
 		group += len;
 	}
@@ -2358,10 +2361,18 @@ static bool mdss_dsi_cmp_panel_reg_v2(struct mdss_dsi_ctrl_pdata *ctrl)
 static int mdss_dsi_gen_read_status(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
 	if (!mdss_dsi_cmp_panel_reg_v2(ctrl_pdata)) {
-		pr_err("%s: Read back value from panel is incorrect\n",
-							__func__);
-		return -EINVAL;
+		ctrl_pdata->status_error_count++;
+		pr_err("%s: Read value bad. Error_cnt = %i\n",
+				__func__, ctrl_pdata->status_error_count);
+		if (ctrl_pdata->status_error_count <
+				ctrl_pdata->max_status_error_count) {
+			return 1;
+		} else {
+			ctrl_pdata->status_error_count = 0;
+			return -EINVAL;
+		}
 	} else {
+		ctrl_pdata->status_error_count = 0;
 		return 1;
 	}
 }
@@ -2578,6 +2589,7 @@ static void mdss_dsi_parse_esd_params(struct device_node *np,
 			ctrl->status_mode = ESD_BTA;
 		} else if (!strcmp(string, "reg_read")) {
 			ctrl->status_mode = ESD_REG;
+			ctrl->status_error_count = 0;
 			ctrl->check_read_status =
 				mdss_dsi_gen_read_status;
 		} else if (!strcmp(string, "reg_read_nt35596")) {

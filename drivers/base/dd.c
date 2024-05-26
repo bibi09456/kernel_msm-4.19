@@ -236,7 +236,7 @@ DEFINE_SHOW_ATTRIBUTE(deferred_devs);
  * In the case of modules, set the default probe timeout to
  * 30 seconds to give userland some time to load needed modules
  */
-static int deferred_probe_timeout = 30;
+static int deferred_probe_timeout = 1;
 #else
 /* In the case of !modules, no probe timeout needed */
 static int deferred_probe_timeout = -1;
@@ -1016,8 +1016,6 @@ static void __device_release_driver(struct device *dev, struct device *parent)
 		else if (drv->remove)
 			drv->remove(dev);
 
-		device_links_driver_cleanup(dev);
-
 		devres_release_all(dev);
 		dma_deconfigure(dev);
 		dev->driver = NULL;
@@ -1026,6 +1024,8 @@ static void __device_release_driver(struct device *dev, struct device *parent)
 			dev->pm_domain->dismiss(dev);
 		pm_runtime_reinit(dev);
 		dev_pm_set_driver_flags(dev, 0);
+
+		device_links_driver_cleanup(dev);
 
 		klist_remove(&dev->p->knode_driver);
 		device_pm_check_callbacks(dev);
